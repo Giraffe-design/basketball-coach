@@ -533,6 +533,11 @@ button:disabled{
 
       <div id="shootResults">
 
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <button id="twoHandBtn" type="button" style="flex:1;background:#111827;color:white;">🏀 투핸드 슛</button>
+          <button id="oneHandBtn" type="button" style="flex:1;background:#e5e7eb;color:#111827;">🏀 원핸드 슛</button>
+        </div>
+
         <div class="metrics">
 
           <div class="metric">
@@ -630,6 +635,22 @@ button:disabled{
 
           </div>
 
+
+          <div class="metric">
+
+            <div class="label">
+              팔 사이 간격
+            </div>
+
+            <div
+              class="value"
+              id="followArmGap"
+            >
+              -
+            </div>
+
+          </div>
+
         </div>
 
 
@@ -673,6 +694,19 @@ button:disabled{
 
           </div>
 
+
+          <div class="check" id="twoHandCheckRow">
+
+            <span class="checkName">
+              투핸드 팔 벌어짐
+            </span>
+
+            <span id="shootCheck4">
+              -
+            </span>
+
+          </div>
+
         </div>
 
       </div>
@@ -690,7 +724,7 @@ button:disabled{
           <div class="metric">
 
             <div class="label">
-              시작 팔꿈치
+              시작 팔꿈치-어깨 각도
             </div>
 
             <div
@@ -807,7 +841,8 @@ button:disabled{
 
         <b>슛 자세</b><br>
 
-        ① 카메라를 몸 옆에 놓기<br>
+        ① 투핸드 / 원핸드 선택<br>
+        ② 카메라를 몸 옆에 놓기<br>
         ② 머리부터 발끝까지 나오게 하기<br>
         ③ 공을 들고 평소처럼 슛하기<br>
         ④ 촬영 종료 후 결과 확인<br><br>
@@ -890,6 +925,10 @@ let recording = false;
 let recordingStart = 0;
 
 let currentMode = "shoot";
+let shootType = "two";
+
+const twoHandBtn = document.getElementById("twoHandBtn");
+const oneHandBtn = document.getElementById("oneHandBtn");
 
 let currentPose = null;
 
@@ -2781,38 +2820,68 @@ function analyzeShootResult(){
 
 
   /*
-    기준
+    팔로스루 구간은 마지막 25%를 사용한다.
+    마지막 한 프레임만 보면 MediaPipe가 순간적으로 튄 값에
+    영향을 받을 수 있으므로 중앙값을 사용한다.
   */
+  const followStart = Math.max(0, Math.floor(samples.length * .75));
+  const followSamples = samples.slice(followStart);
 
-  const elbowOK =
-    elbow >= 125;
+  const followArmGaps = followSamples.map(s => {
+    const lm = s.landmarks;
+    if(!lm || lm.length < 29) return null;
+    const ls = lm[11], le = lm[13], lw = lm[15];
+    const rs = lm[12], re = lm[14], rw = lm[16];
+    if(!ls || !le || !lw || !rs || !re || !rw) return null;
+    const shoulderWidth = Math.max(0.04, distance(ls, rs));
+    const elbowGap = distance(le, re) / shoulderWidth;
+    const wristGap = distance(lw, rw) / shoulderWidth;
+    return { elbowGap, wristGap, combinedGap: Math.max(elbowGap, wristGap) };
+  }).filter(Boolean);
 
+  const followArmGap = followArmGaps.length
+    ? median(followArmGaps.map(v => v.combinedGap))
+    : 0;
+
+  /*
+    투핸드 슛에서만 팔 벌어짐을 평가한다.
+    원핸드는 이 항목을 점수에서 제외한다.
+
+    1.50 이하 : 팔이 크게 벌어지지 않음
+    1.50~1.80 : 경계
+    1.80 초과 : 팔이 많이 벌어짐
+  */
+  const twoHandArmOK = followArmGap <= 1.50;
+  const twoHandArmBorder = followArmGap > 1.50 && followArmGap <= 1.80;
+
+  const elbowOK = elbow >= 125;
 
   const kneeOK =
     knee >= 120 &&
     knee <= 175;
 
+  const followExtensionOK = follow >= 125;
 
-  const followOK =
-    follow >= 125;
-
-
+  /*
+    기존 40/30/30 구조를 유지하되,
+    투핸드에서는 팔로스루 30점을
+    '팔이 제대로 펴졌는지 20점 + 양팔이 과하게 벌어지지 않았는지 10점'으로 나눈다.
+    원핸드는 팔 벌어짐 10점을 자동으로 통과시킨다.
+  */
   let score = 0;
 
+  if(elbowOK) score += 40;
+  if(kneeOK) score += 30;
+  if(followExtensionOK) score += 20;
 
-  if(elbowOK){
-    score += 40;
+  if(shootType === "two") {
+    if(twoHandArmOK) score += 10;
+  } else {
+    score += 10;
   }
 
-
-  if(kneeOK){
-    score += 30;
-  }
-
-
-  if(followOK){
-    score += 30;
-  }
+  const followOK = followExtensionOK &&
+    (shootType === "one" || twoHandArmOK);
 
 
   setText(
@@ -2856,6 +2925,13 @@ function analyzeShootResult(){
     `${Math.round(follow)}°`
   );
 
+  setText(
+    "followArmGap",
+    shootType === "two"
+      ? `${followArmGap.toFixed(2)}배`
+      : "원핸드 - 제외"
+  );
+
 
   setCheck(
     "shootCheck1",
@@ -2871,8 +2947,24 @@ function analyzeShootResult(){
 
   setCheck(
     "shootCheck3",
-    followOK
+    followExtensionOK
   );
+
+  const twoHandCheckRow = document.getElementById("twoHandCheckRow");
+  if(twoHandCheckRow){
+    twoHandCheckRow.style.display = shootType === "two" ? "flex" : "none";
+  }
+
+  if(shootType === "two") {
+    setCheck("shootCheck4", twoHandArmOK);
+    if(twoHandArmBorder){
+      const el = document.getElementById("shootCheck4");
+      if(el){
+        el.textContent = "△ 조금 모으기";
+        el.className = "no";
+      }
+    }
+  }
 
 }
 
@@ -2937,6 +3029,21 @@ function getPassFrameMetrics(lm){
   const leftElbow = angle(ls, le, lw);
   const rightElbow = angle(rs, re, rw);
 
+  /*
+    패스 시작 자세의 핵심 판정.
+    옆모습에서 '팔꿈치-가까운 어깨-먼 어깨'의 관계를 본다.
+    정확히는 팔꿈치를 꼭짓점으로 두고
+    가까운 어깨 -> 팔꿈치 -> 먼 어깨 각도를 계산한다.
+
+    팔꿈치가 몸에 가까우면 두 어깨가 비슷한 방향에 모여
+    이 각도가 작아지고, 팔꿈치가 옆으로 떨어지면 각도가 커진다.
+  */
+  const nearIsLeft = getSide(lm) === "left";
+  const nearShoulder = nearIsLeft ? ls : rs;
+  const farShoulder = nearIsLeft ? rs : ls;
+  const nearElbow = nearIsLeft ? le : re;
+  const elbowBodyAngle = angle(nearShoulder, nearElbow, farShoulder);
+
   const leftShoulder = distance(ls, lh);
   const rightShoulder = distance(rs, rh);
   const shoulderWidth = Math.max(0.05, distance(ls, rs));
@@ -2952,6 +3059,7 @@ function getPassFrameMetrics(lm){
     avgLineGap: (leftLineGap + rightLineGap) / 2,
     elbow: getSide(lm) === "left" ? leftElbow : rightElbow,
     avgElbow: (leftElbow + rightElbow) / 2,
+    elbowBodyAngle,
     handDistance
   };
 
@@ -3093,40 +3201,33 @@ function analyzePassResult(){
     시작 자세 판정
     =========================================================
 
-    옆모습 기준의 '어깨-팔꿈치-손목' 각도.
+    사용자가 지정한 기준:
+    '가까운 어깨 - 팔꿈치 - 먼 어깨' 각도.
 
-    ≤ 75°  : 팔꿈치를 충분히 접고 붙인 시작 자세
-    75~95°  : 경계 구간
-    > 95°   : 팔꿈치가 많이 벌어진 시작 자세
+    이 각도는 팔꿈치를 꼭짓점으로 본다.
+    각도가 작으면 팔꿈치가 몸 가까이에 있고,
+    각도가 커지면 팔꿈치가 옆으로 떨어져 있는 것으로 본다.
 
-    경계 구간에서는 바로 실패시키지 않고,
-    정상 점수를 조금만 주도록 한다.
+    ≤ 45° : 붙인 시작 자세
+    45~60° : 경계
+    > 60° : 팔꿈치가 떨어진 시작 자세
   */
+
+  const startBodyAngle =
+    median(earlyMetrics.map(m => m.elbowBodyAngle));
 
   let startScore = 0;
   let startOK = false;
 
-
-  if(startElbow <= 75){
-
+  if(startBodyAngle <= 45){
     startScore = 50;
     startOK = true;
-
-  }else if(startElbow <= 95){
-
-    /*
-      애매한 자세.
-      50점 전체를 주지는 않지만 완전 실패로 처리하지 않는다.
-    */
-
+  }else if(startBodyAngle <= 60){
     startScore = 25;
     startOK = false;
-
   }else{
-
     startScore = 0;
     startOK = false;
-
   }
 
 
@@ -3178,7 +3279,7 @@ function analyzePassResult(){
 
   setText(
     "passStartElbow",
-    `${Math.round(startElbow)}°`
+    `${Math.round(startBodyAngle)}°`
   );
 
 
@@ -3229,8 +3330,8 @@ function analyzePassResult(){
 
   if(
     check1 &&
-    startElbow > 75 &&
-    startElbow <= 95
+    startBodyAngle > 45 &&
+    startBodyAngle <= 60
   ){
 
     check1.textContent =
@@ -3370,6 +3471,7 @@ function resetResults(){
     "releaseAngle",
     "riseAmount",
     "followThrough",
+    "followArmGap",
 
     "passStartElbow",
     "passFinishElbow",
@@ -3393,6 +3495,7 @@ function resetResults(){
     "shootCheck1",
     "shootCheck2",
     "shootCheck3",
+    "shootCheck4",
 
     "passCheck1",
     "passCheck2",
@@ -3470,6 +3573,49 @@ shootTab.addEventListener(
 
   }
 );
+
+
+/* =========================================================
+   슛 방식 선택
+========================================================= */
+
+function updateShootTypeButtons(){
+  if(twoHandBtn && oneHandBtn){
+    if(shootType === "two"){
+      twoHandBtn.style.background = "#111827";
+      twoHandBtn.style.color = "white";
+      oneHandBtn.style.background = "#e5e7eb";
+      oneHandBtn.style.color = "#111827";
+    }else{
+      oneHandBtn.style.background = "#111827";
+      oneHandBtn.style.color = "white";
+      twoHandBtn.style.background = "#e5e7eb";
+      twoHandBtn.style.color = "#111827";
+    }
+  }
+}
+
+if(twoHandBtn){
+  twoHandBtn.addEventListener("click", () => {
+    if(recording) return;
+    shootType = "two";
+    updateShootTypeButtons();
+    resetResults();
+    statusBox.textContent = "투핸드 슛입니다. 팔로스루에서 양팔이 바깥으로 벌어지지 않는지도 확인합니다.";
+  });
+}
+
+if(oneHandBtn){
+  oneHandBtn.addEventListener("click", () => {
+    if(recording) return;
+    shootType = "one";
+    updateShootTypeButtons();
+    resetResults();
+    statusBox.textContent = "원핸드 슛입니다. 팔로스루 팔 벌어짐 평가는 제외합니다.";
+  });
+}
+
+updateShootTypeButtons();
 
 
 /* =========================================================
