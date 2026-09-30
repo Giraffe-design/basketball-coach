@@ -181,25 +181,47 @@ function calc(lm){
 async function loadAI(){
   status('AI 자세 분석 모듈을 불러오는 중입니다...');
   try{
-    const mod=await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm');
+    let mod;
+    try{
+      // 공식 문서에서 안내하는 vision_bundle.mjs 방식
+      mod = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs');
+    }catch(firstError){
+      // CDN의 ESM 변환 주소를 보조 경로로 사용
+      mod = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm');
+    }
+
     const {PoseLandmarker,FilesetResolver}=mod;
+    if(!PoseLandmarker || !FilesetResolver) throw new Error('MediaPipe API를 불러오지 못했습니다.');
+
     const vision=await FilesetResolver.forVisionTasks(
       'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm'
     );
-    landmarker=await PoseLandmarker.createFromOptions(vision,{
+
+    const options={
       baseOptions:{
-        modelAssetPath:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
-        delegate:'GPU'
+        modelAssetPath:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task'
       },
       runningMode:'VIDEO',
       numPoses:1
-    });
+    };
+
+    // GPU가 안 되는 브라우저에서는 CPU로 자동 재시도
+    try{
+      landmarker=await PoseLandmarker.createFromOptions(vision,{
+        ...options,
+        baseOptions:{...options.baseOptions,delegate:'GPU'}
+      });
+    }catch(gpuError){
+      console.warn('GPU 초기화 실패, CPU로 재시도합니다.',gpuError);
+      landmarker=await PoseLandmarker.createFromOptions(vision,options);
+    }
+
     status('AI 분석 준비 완료. 「자세 분석 시작」을 눌러 주세요.');
     analyzeBtn.disabled=false;
   }catch(e){
-    console.error(e);
-    status('카메라는 연결됐지만 AI 분석 모듈을 불러오지 못했습니다. 인터넷 연결을 확인해 주세요.');
-    tipEl.textContent='카메라 화면은 사용할 수 있습니다. AI 분석은 인터넷 연결이 필요합니다.';
+    console.error('AI 초기화 오류:',e);
+    status('카메라는 연결됐지만 AI 분석 모듈 초기화에 실패했습니다. 잠시 후 새로고침해 주세요.');
+    tipEl.textContent='인터넷은 연결되어 있어도 AI 모델/CDN 로딩이 막힐 수 있습니다. 새로고침 후 다시 카메라를 시작해 보세요.';
   }
 }
 
