@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 농구 자세 코치</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,"Noto Sans KR",sans-serif;background:#f4f6f8;color:#18212b}
+header{background:#18212b;color:#fff;padding:22px 20px;text-align:center}
+header h1{margin:0 0 7px;font-size:28px}
+header p{margin:0;color:#d9e1e8;font-size:14px}
+.wrap{max-width:1100px;margin:20px auto;padding:0 16px}
+.tabs{display:flex;gap:8px;margin-bottom:14px}
+.tab{flex:1;border:0;border-radius:12px;padding:14px;background:#dfe5ea;font-size:17px;font-weight:700;cursor:pointer}
+.tab.active{background:#18212b;color:#fff}
+.status{background:#fff;border-radius:12px;padding:13px 15px;margin-bottom:14px;border:1px solid #dce2e7;font-size:14px}
+.status strong{margin-right:8px}
+.main{display:grid;grid-template-columns:1.4fr .8fr;gap:16px}
+.card{background:#fff;border:1px solid #dce2e7;border-radius:16px;padding:16px;box-shadow:0 3px 12px rgba(0,0,0,.04)}
+.videoBox{position:relative;background:#101820;border-radius:12px;overflow:hidden;aspect-ratio:16/9}
+video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+video{transform:scaleX(-1)}
+canvas{pointer-events:none}
+.placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:#fff;padding:25px;font-size:18px;line-height:1.6}
+.controls{display:flex;gap:8px;margin-top:12px}
+button.action{flex:1;border:0;border-radius:10px;padding:14px;font-size:16px;font-weight:700;cursor:pointer}
+.start{background:#1f7a4d;color:#fff}.analyze{background:#315fa8;color:#fff}.stop{background:#d94a4a;color:#fff}
+button:disabled{opacity:.45;cursor:not-allowed}
+.score{text-align:center;padding:10px 0 16px}
+.score .num{font-size:56px;font-weight:800}
+.score small{display:block;color:#687581}
+.check{display:flex;align-items:center;justify-content:space-between;padding:13px 12px;border-radius:10px;background:#f3f5f7;margin:8px 0}
+.badge{font-size:13px;font-weight:700}
+.ok{color:#167343}.no{color:#c83c3c}.wait{color:#737f89}
+.tip{margin-top:14px;padding:13px;border-radius:10px;background:#eef3f8;line-height:1.55;font-size:14px}
+.results{margin-top:16px}
+.result{border-bottom:1px solid #e5e8eb;padding:10px 0;font-size:14px}
+@media(max-width:800px){.main{grid-template-columns:1fr}.controls{flex-wrap:wrap}.action{min-width:30%}}
+</style>
+</head>
+<body>
+<header>
+<h1>🏀 AI 농구 자세 코치</h1>
+<p>카메라로 농구 슛·패스 자세를 확인해 보세요.</p>
+</header>
+
+<div class="wrap">
+<div class="tabs">
+<button class="tab active" id="shootTab">슛 자세</button>
+<button class="tab" id="passTab">패스 자세</button>
+</div>
+
+<div class="status" id="status"><strong>상태</strong><span>카메라 시작 버튼을 눌러 주세요.</span></div>
+
+<div class="main">
+<section class="card">
+<div class="videoBox">
+<video id="video" autoplay playsinline muted></video>
+<canvas id="canvas"></canvas>
+<div class="placeholder" id="placeholder">카메라를 시작하면<br>여기에 내 모습이 나타납니다.</div>
+</div>
+<div class="controls">
+<button class="action start" id="startBtn">카메라 시작</button>
+<button class="action analyze" id="analyzeBtn" disabled>자세 분석 시작</button>
+<button class="action stop" id="stopBtn" disabled>중지</button>
+</div>
+<div class="tip">📌 머리부터 발끝까지 화면에 들어오도록 서 주세요. 가능하면 몸을 정면 또는 약간 옆으로 보여 주세요.</div>
+</section>
+
+<section class="card">
+<div class="score">
+<small>현재 자세 점수</small>
+<div class="num" id="score">--</div>
+</div>
+<div class="check"><span>① 무릎 굽힘</span><span class="badge wait" id="knee">대기</span></div>
+<div class="check"><span>② 팔꿈치 벌어짐</span><span class="badge wait" id="elbow">대기</span></div>
+<div class="check"><span>③ 무릎·팔꿈치 함께 펴기</span><span class="badge wait" id="sync">대기</span></div>
+<div class="tip" id="tip">카메라를 시작한 뒤 자세 분석을 시작하세요.</div>
+<div class="results">
+<strong>최근 분석</strong>
+<div id="results">아직 분석 결과가 없습니다.</div>
+</div>
+</section>
+</div>
+</div>
+
+<script type="module">
+const video=document.getElementById('video');
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+const placeholder=document.getElementById('placeholder');
+const statusEl=document.getElementById('status');
+const startBtn=document.getElementById('startBtn');
+const analyzeBtn=document.getElementById('analyzeBtn');
+const stopBtn=document.getElementById('stopBtn');
+const scoreEl=document.getElementById('score');
+const kneeEl=document.getElementById('knee');
+const elbowEl=document.getElementById('elbow');
+const syncEl=document.getElementById('sync');
+const tipEl=document.getElementById('tip');
+const resultsEl=document.getElementById('results');
+const shootTab=document.getElementById('shootTab');
+const passTab=document.getElementById('passTab');
+
+let stream=null;
+let running=false;
+let analyzing=false;
+let mode='shoot';
+let landmarker=null;
+let lastVideoTime=-1;
+let samples=[];
+
+function status(msg){
+  statusEl.innerHTML='<strong>상태</strong><span>'+msg+'</span>';
+}
+function setBadge(el,text,cls){
+  el.textContent=text;
+  el.className='badge '+cls;
+}
+function angle(a,b,c){
+  const ab={x:a.x-b.x,y:a.y-b.y}, cb={x:c.x-b.x,y:c.y-b.y};
+  const dot=ab.x*cb.x+ab.y*cb.y;
+  const den=Math.hypot(ab.x,ab.y)*Math.hypot(cb.x,cb.y);
+  if(!den)return 180;
+  return Math.acos(Math.max(-1,Math.min(1,dot/den)))*180/Math.PI;
+}
+function drawPoint(p){
+  ctx.beginPath();ctx.arc(p.x*canvas.width,p.y*canvas.height,6,0,Math.PI*2);
+  ctx.fillStyle='#00ff66';ctx.fill();
+}
+function drawLine(a,b){
+  ctx.beginPath();ctx.moveTo(a.x*canvas.width,a.y*canvas.height);
+  ctx.lineTo(b.x*canvas.width,b.y*canvas.height);
+  ctx.strokeStyle='#00ff66';ctx.lineWidth=4;ctx.stroke();
+}
+function drawPose(lm){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  const pairs=[[11,13],[13,15],[12,14],[14,16],[11,12],[11,23],[12,24],[23,25],[25,27],[24,26],[26,28]];
+  pairs.forEach(([a,b])=>{if(lm[a]&&lm[b])drawLine(lm[a],lm[b])});
+  [11,12,13,14,15,16,23,24,25,26,27,28].forEach(i=>{if(lm[i])drawPoint(lm[i])});
+}
+function resetAnalysis(){
+  scoreEl.textContent='--';
+  setBadge(kneeEl,'대기','wait');
+  setBadge(elbowEl,'대기','wait');
+  setBadge(syncEl,'대기','wait');
+  tipEl.textContent='카메라를 시작한 뒤 자세 분석을 시작하세요.';
+  samples=[];
+}
+function calc(lm){
+  const kneeL=angle(lm[23],lm[25],lm[27]);
+  const kneeR=angle(lm[24],lm[26],lm[28]);
+  const elbowL=angle(lm[11],lm[13],lm[15]);
+  const elbowR=angle(lm[12],lm[14],lm[16]);
+  const knee=(kneeL+kneeR)/2;
+  const elbow=(elbowL+elbowR)/2;
+  const kneeOK=mode==='shoot'?knee>=105&&knee<=150:knee>=115&&knee<=155;
+  const elbowOK=elbow>=145;
+  const now=performance.now();
+  samples.push({t:now,knee,elbow});
+  if(samples.length>30)samples.shift();
+  let syncOK=false;
+  if(samples.length>=8){
+    const first=samples[0], last=samples[samples.length-1];
+    const kd=last.knee-first.knee, ed=last.elbow-first.elbow;
+    syncOK=kd>8&&ed>8&&Math.abs(kd-ed)<40;
+  }
+  let score=(kneeOK?34:0)+(elbowOK?33:0)+(syncOK?33:0);
+  scoreEl.textContent=score;
+  setBadge(kneeEl,kneeOK?'좋아요':'더 굽혀 보세요',kneeOK?'ok':'no');
+  setBadge(elbowEl,elbowOK?'좋아요':'팔꿈치를 덜 벌려요',elbowOK?'ok':'no');
+  setBadge(syncEl,syncOK?'함께 펴지고 있어요':'움직임을 크게 해보세요',syncOK?'ok':'no');
+  if(score===100)tipEl.textContent='좋아요! 세 가지 기준을 모두 만족했어요.';
+  else if(!kneeOK)tipEl.textContent='무릎을 살짝 굽힌 준비 자세에서 시작해 보세요.';
+  else if(!elbowOK)tipEl.textContent='팔꿈치가 몸 옆으로 너무 벌어지지 않게 해 보세요.';
+  else tipEl.textContent='무릎을 펴면서 팔꿈치도 같은 흐름으로 펴 보세요.';
+  return {score,kneeOK,elbowOK,syncOK};
+}
+
+async function loadAI(){
+  status('AI 자세 분석 모듈을 불러오는 중입니다...');
+  try{
+    let mod;
+    try{
+      // 공식 문서에서 안내하는 vision_bundle.mjs 방식
+      mod = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs');
+    }catch(firstError){
+      // CDN의 ESM 변환 주소를 보조 경로로 사용
+      mod = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/+esm');
+    }
+
+    const {PoseLandmarker,FilesetResolver}=mod;
+    if(!PoseLandmarker || !FilesetResolver) throw new Error('MediaPipe API를 불러오지 못했습니다.');
+
+    const vision=await FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm'
+    );
+
+    const options={
+      baseOptions:{
+        modelAssetPath:'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task'
+      },
+      runningMode:'VIDEO',
+      numPoses:1
+    };
+
+    // GPU가 안 되는 브라우저에서는 CPU로 자동 재시도
+    try{
+      landmarker=await PoseLandmarker.createFromOptions(vision,{
+        ...options,
+        baseOptions:{...options.baseOptions,delegate:'GPU'}
+      });
+    }catch(gpuError){
+      console.warn('GPU 초기화 실패, CPU로 재시도합니다.',gpuError);
+      landmarker=await PoseLandmarker.createFromOptions(vision,options);
+    }
+
+    status('AI 분석 준비 완료. 「자세 분석 시작」을 눌러 주세요.');
+    analyzeBtn.disabled=false;
+  }catch(e){
+    console.error('AI 초기화 오류:',e);
+    status('카메라는 연결됐지만 AI 분석 모듈 초기화에 실패했습니다. 잠시 후 새로고침해 주세요.');
+    tipEl.textContent='인터넷은 연결되어 있어도 AI 모델/CDN 로딩이 막힐 수 있습니다. 새로고침 후 다시 카메라를 시작해 보세요.';
+  }
+}
+
+async function startCamera(){
+  if(stream)return;
+  startBtn.disabled=true;
+  startBtn.textContent='카메라 연결 중...';
+  status('카메라 권한을 요청하는 중입니다...');
+  try{
+    if(!navigator.mediaDevices?.getUserMedia)throw new Error('NO_CAMERA_API');
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}},
+      audio:false
+    });
+    video.srcObject=stream;
+    await video.play();
+    placeholder.style.display='none';
+    stopBtn.disabled=false;
+    startBtn.textContent='카메라 연결됨';
+    status('카메라 연결 완료. 화면에 전신이 보이도록 서 주세요.');
+    canvas.width=video.videoWidth||1280;
+    canvas.height=video.videoHeight||720;
+    await loadAI();
+  }catch(e){
+    console.error(e);
+    stream=null;
+    startBtn.disabled=false;
+    startBtn.textContent='카메라 시작';
+    if(e.name==='NotAllowedError')status('카메라 권한이 거부되었습니다. 브라우저 주소창의 카메라 권한을 허용해 주세요.');
+    else if(e.name==='NotFoundError')status('사용할 수 있는 카메라를 찾지 못했습니다.');
+    else if(e.message==='NO_CAMERA_API')status('이 페이지에서는 카메라 기능을 사용할 수 없습니다. GitHub Pages 같은 HTTPS 주소에서 열어 주세요.');
+    else status('카메라 연결에 실패했습니다: '+(e.message||e.name));
+  }
+}
+
+function stopCamera(){
+  running=false;analyzing=false;
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
+  video.srcObject=null;
+  placeholder.style.display='flex';
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  startBtn.disabled=false;startBtn.textContent='카메라 시작';
+  analyzeBtn.disabled=true;stopBtn.disabled=true;
+  resetAnalysis();
+  status('카메라가 중지되었습니다.');
+}
+
+function loop(){
+  if(!running)return;
+  if(video.readyState>=2&&landmarker&&video.currentTime!==lastVideoTime){
+    lastVideoTime=video.currentTime;
+    const result=landmarker.detectForVideo(video,performance.now());
+    if(result.landmarks?.length){
+      drawPose(result.landmarks[0]);
+      if(analyzing)calc(result.landmarks[0]);
+    }else{
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      if(analyzing)tipEl.textContent='몸이 잘 보이지 않습니다. 카메라에서 조금 떨어져 보세요.';
+    }
+  }
+  requestAnimationFrame(loop);
+}
+
+startBtn.onclick=async()=>{
+  await startCamera();
+  if(stream){running=true;requestAnimationFrame(loop)}
+};
+analyzeBtn.onclick=()=>{
+  if(!landmarker){status('AI 분석 모듈이 아직 준비되지 않았습니다.');return}
+  analyzing=!analyzing;
+  analyzeBtn.textContent=analyzing?'분석 진행 중...':'자세 분석 시작';
+  resetAnalysis();
+  if(analyzing){
+    status(mode==='shoot'?'슛 자세를 분석하고 있습니다.':'패스 자세를 분석하고 있습니다.');
+    tipEl.textContent='동작을 천천히 크게 해 보세요.';
+  }else status('분석을 잠시 멈췄습니다.');
+};
+stopBtn.onclick=stopCamera;
+
+shootTab.onclick=()=>{
+  mode='shoot';shootTab.classList.add('active');passTab.classList.remove('active');
+  resetAnalysis();status(stream?'슛 자세 모드입니다.':'카메라 시작 버튼을 눌러 주세요.');
+};
+passTab.onclick=()=>{
+  mode='pass';passTab.classList.add('active');shootTab.classList.remove('active');
+  resetAnalysis();status(stream?'패스 자세 모드입니다.':'카메라 시작 버튼을 눌러 주세요.');
+};
+
+window.addEventListener('beforeunload',stopCamera);
+</script>
+</body>
+</html>
