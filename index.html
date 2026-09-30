@@ -98,7 +98,7 @@ header p{
 }
 
 /*
-  영상 자체를 2배 확대
+  영상 영역을 크게 사용
 */
 .videoBox video,
 .videoBox canvas{
@@ -309,8 +309,51 @@ button:disabled{
 
 @media(max-width:900px){
 
+  .container{
+    width:100%;
+    max-width:none;
+    margin:12px auto;
+    padding:0 10px;
+  }
+
+  header{
+    padding:18px 16px;
+  }
+
+  header h1{
+    font-size:20px;
+  }
+
   .layout{
     grid-template-columns:1fr;
+    gap:12px;
+  }
+
+  .card{
+    padding:10px;
+    border-radius:14px;
+  }
+
+  .videoBox{
+    width:100%;
+    aspect-ratio:3/4;
+    min-height:0;
+  }
+
+  .videoBox video,
+  .videoBox canvas{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+  }
+
+  .tabs{
+    margin-bottom:10px;
+  }
+
+  .tab{
+    flex:1;
+    padding:11px 8px;
   }
 
 }
@@ -1685,34 +1728,34 @@ function drawAngleLabel(
   y
 ){
 
+  ctx.save();
+
+  /*
+    캔버스 전체가 CSS에서 좌우 반전되어 있기 때문에
+    숫자/글자만 한 번 더 좌우 반전해서 그린다.
+    그러면 최종 화면에서는 숫자가 정상 방향으로 보인다.
+  */
+  ctx.translate(2 * x, 0);
+  ctx.scale(-1, 1);
+
   ctx.font =
     "bold 20px Arial";
 
   const width =
-    ctx.measureText(text).width +
-    20;
-
+    ctx.measureText(text).width + 20;
 
   ctx.fillStyle =
     "rgba(0,0,0,.8)";
 
-
   ctx.fillRect(
-
     x - width/2,
-
     y - 40,
-
     width,
-
     30
-
   );
-
 
   ctx.fillStyle =
     "#ffffff";
-
 
   ctx.textAlign =
     "center";
@@ -1720,19 +1763,15 @@ function drawAngleLabel(
   ctx.textBaseline =
     "middle";
 
-
   ctx.fillText(
-
     text,
-
     x,
-
     y - 25
-
   );
 
-}
+  ctx.restore();
 
+}
 
 /* =========================================================
    손
@@ -2842,201 +2881,154 @@ function analyzeShootResult(){
    패스 결과
 ========================================================= */
 
+function pointLineDistance(p, a, b){
+
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const apx = p.x - a.x;
+  const apy = p.y - a.y;
+
+  const len2 = abx*abx + aby*aby;
+
+  if(len2 < 0.000001){
+    return Math.hypot(apx, apy);
+  }
+
+  const t = Math.max(0, Math.min(1, (apx*abx + apy*aby) / len2));
+  const qx = a.x + t*abx;
+  const qy = a.y + t*aby;
+
+  return Math.hypot(p.x-qx, p.y-qy);
+
+}
+
+function getPassFrameMetrics(lm){
+
+  if(!lm || lm.length < 29){
+    return null;
+  }
+
+  const ls = lm[11], le = lm[13], lw = lm[15];
+  const rs = lm[12], re = lm[14], rw = lm[16];
+  const lh = lm[23], rh = lm[24];
+
+  if(!ls || !le || !lw || !rs || !re || !rw || !lh || !rh){
+    return null;
+  }
+
+  const torsoTop = {
+    x:(ls.x+rs.x)/2,
+    y:(ls.y+rs.y)/2
+  };
+
+  const torsoBottom = {
+    x:(lh.x+rh.x)/2,
+    y:(lh.y+rh.y)/2
+  };
+
+  const torsoLength = Math.max(0.05, distance(torsoTop, torsoBottom));
+
+  const leftBodyGap = distance(le, lh) / torsoLength;
+  const rightBodyGap = distance(re, rh) / torsoLength;
+
+  const leftLineGap = pointLineDistance(le, torsoTop, torsoBottom) / torsoLength;
+  const rightLineGap = pointLineDistance(re, torsoTop, torsoBottom) / torsoLength;
+
+  const leftElbow = angle(ls, le, lw);
+  const rightElbow = angle(rs, re, rw);
+
+  const leftShoulder = distance(ls, lh);
+  const rightShoulder = distance(rs, rh);
+  const shoulderWidth = Math.max(0.05, distance(ls, rs));
+  const handDistance = distance(lw, rw) / shoulderWidth;
+
+  return {
+    leftBodyGap,
+    rightBodyGap,
+    leftLineGap,
+    rightLineGap,
+    startBodyGap: Math.min(leftBodyGap, rightBodyGap),
+    avgBodyGap: (leftBodyGap + rightBodyGap) / 2,
+    avgLineGap: (leftLineGap + rightLineGap) / 2,
+    elbow: getSide(lm) === "left" ? leftElbow : rightElbow,
+    avgElbow: (leftElbow + rightElbow) / 2,
+    handDistance
+  };
+
+}
+
 function analyzePassResult(){
 
-  if(
-    !samples.length
-  ){
-
-    setText(
-      "scoreNumber",
-      "0"
-    );
-
+  if(!samples.length){
+    setText("scoreNumber", "0");
     return;
-
   }
 
+  const earlyCount = Math.max(3, Math.floor(samples.length * .20));
+  const early = samples.slice(0, earlyCount);
 
-  const split =
-    Math.max(
-      1,
-      Math.floor(
-        samples.length * .25
-      )
-    );
+  const lateStart = Math.max(0, Math.floor(samples.length * .72));
+  const late = samples.slice(lateStart);
 
+  const earlyMetrics = early
+    .map(s => getPassFrameMetrics(s.landmarks))
+    .filter(Boolean);
 
-  const startSamples =
-    samples.slice(
-      0,
-      split
-    );
+  const lateMetrics = late
+    .map(s => getPassFrameMetrics(s.landmarks))
+    .filter(Boolean);
 
-
-  const finishSamples =
-    samples.slice(
-      Math.floor(
-        samples.length * .7
-      )
-    );
-
-
-  const startElbow =
-    average(
-      startSamples.map(
-        s => s.elbow
-      )
-    );
-
-
-  const finishElbow =
-    average(
-      finishSamples.map(
-        s => s.elbow
-      )
-    );
-
-
-  const elbowChange =
-    finishElbow -
-    startElbow;
-
-
-  let handDistance =
-    "-";
-
-
-  if(currentPose){
-
-    const leftWrist =
-      currentPose[15];
-
-    const rightWrist =
-      currentPose[16];
-
-    const leftShoulder =
-      currentPose[11];
-
-    const rightShoulder =
-      currentPose[12];
-
-
-    if(
-      leftWrist &&
-      rightWrist &&
-      leftShoulder &&
-      rightShoulder
-    ){
-
-      const wrists =
-        distance(
-          leftWrist,
-          rightWrist
-        );
-
-
-      const shoulders =
-        distance(
-          leftShoulder,
-          rightShoulder
-        );
-
-
-      if(
-        shoulders > 0
-      ){
-
-        handDistance =
-          (
-            wrists /
-            shoulders *
-            100
-          ).toFixed(0) + "%";
-
-      }
-
-    }
-
+  if(!earlyMetrics.length){
+    setText("scoreNumber", "0");
+    return;
   }
 
+  const startElbow = average(earlyMetrics.map(m => m.elbow));
+  const finishElbow = average((lateMetrics.length ? lateMetrics : earlyMetrics).map(m => m.elbow));
+  const startBodyGap = average(earlyMetrics.map(m => m.avgBodyGap));
+  const finishBodyGap = average((lateMetrics.length ? lateMetrics : earlyMetrics).map(m => m.avgBodyGap));
+  const finishHandDistance = average((lateMetrics.length ? lateMetrics : earlyMetrics).map(m => m.handDistance));
 
-  const startOK =
-    startElbow < 145;
+  const elbowChange = finishElbow - startElbow;
 
+  /*
+    핵심 수정:
+    기존에는 '시작 팔꿈치 각도' 하나만 35점이라
+    팔꿈치가 몸에서 떨어져 있어도 점수가 높게 나올 수 있었다.
 
-  const finishOK =
-    finishElbow > 135;
+    이제 시작 자세를 가장 크게 반영한다.
+    팔꿈치가 몸 가까이 있는지 + 충분히 접혀 있는지를 함께 평가한다.
+  */
+  const startCloseOK = startBodyGap <= 0.62;
+  const startBendOK = startElbow <= 135;
+  const startOK = startCloseOK && startBendOK;
 
+  /* 패스 순간에는 팔이 충분히 펴졌는지 평가 */
+  const finishOK = finishElbow >= 145 && elbowChange >= 12;
 
-  const changeOK =
-    elbowChange > 10;
+  /* 패스 후 손이 지나치게 벌어지지 않고 앞으로 모이는지 평가 */
+  const handOK = finishHandDistance <= 0.95;
 
-
+  /*
+    시작 자세 50점 + 팔 펴기 30점 + 마무리 손 모양 20점.
+    따라서 시작 자세가 틀리면 다른 항목을 잘해도 50점을 넘지 못한다.
+  */
   let score = 0;
 
+  if(startCloseOK) score += 30;
+  if(startBendOK) score += 20;
+  if(finishOK) score += 30;
+  if(handOK) score += 20;
 
-  if(startOK){
-    score += 35;
-  }
+  setText("scoreNumber", score);
+  setText("passStartElbow", `${Math.round(startElbow)}°`);
+  setText("passFinishElbow", `${Math.round(finishElbow)}°`);
+  setText("passElbowChange", `${Math.round(elbowChange)}°`);
+  setText("passHandDistance", `${Math.round(finishHandDistance * 100)}%`);
 
-
-  if(finishOK){
-    score += 35;
-  }
-
-
-  if(changeOK){
-    score += 30;
-  }
-
-
-  setText(
-    "scoreNumber",
-    score
-  );
-
-
-  setText(
-    "passStartElbow",
-    `${Math.round(startElbow)}°`
-  );
-
-
-  setText(
-    "passFinishElbow",
-    `${Math.round(finishElbow)}°`
-  );
-
-
-  setText(
-    "passElbowChange",
-    `${Math.round(elbowChange)}°`
-  );
-
-
-  setText(
-    "passHandDistance",
-    handDistance
-  );
-
-
-  setCheck(
-    "passCheck1",
-    startOK
-  );
-
-
-  setCheck(
-    "passCheck2",
-    finishOK
-  );
-
-
-  setCheck(
-    "passCheck3",
-    changeOK
-  );
+  setCheck("passCheck1", startOK);
+  setCheck("passCheck2", finishOK);
+  setCheck("passCheck3", handOK);
 
 }
 
