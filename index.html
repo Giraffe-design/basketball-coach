@@ -779,6 +779,22 @@ button:disabled{
           <div class="metric">
 
             <div class="label">
+              던지기 직전 팔꿈치 각도
+            </div>
+
+            <div
+              class="value"
+              id="passLateBodyAngle"
+            >
+              -
+            </div>
+
+          </div>
+
+
+          <div class="metric">
+
+            <div class="label">
               패스 후 손 간격
             </div>
 
@@ -803,6 +819,19 @@ button:disabled{
             </span>
 
             <span id="passCheck1">
+              -
+            </span>
+
+          </div>
+
+
+          <div class="check">
+
+            <span class="checkName">
+              팔꿈치 벌어짐 억제
+            </span>
+
+            <span id="passCheckElbowFlare">
               -
             </span>
 
@@ -1748,8 +1777,8 @@ function drawPose(
     어깨-팔꿈치-손목 각도
 
     ★ 패스:
-    가까운 어깨 → 팔꿈치 → 먼 어깨 각도
-    (팔꿈치를 꼭짓점으로 양쪽 어깨를 연결한 각도)
+    먼 어깨 → 가까운 어깨 → 팔꿈치 각도
+    (가까운 어깨가 꼭짓점인 빨간 각도)
   */
 
   const metrics =
@@ -1832,17 +1861,19 @@ function drawBodyAngleArc(
     return;
   }
 
-  const ex = elbow.x * overlay.width;
-  const ey = elbow.y * overlay.height;
+  // ★ 빨간 각도의 꼭짓점은 팔꿈치가 아니라 '가까운 어깨'다.
+  // 먼 어깨 → 가까운 어깨 → 팔꿈치
+  const sx = nearShoulder.x * overlay.width;
+  const sy = nearShoulder.y * overlay.height;
 
   const a1 = Math.atan2(
-    nearShoulder.y - elbow.y,
-    nearShoulder.x - elbow.x
+    farShoulder.y - nearShoulder.y,
+    farShoulder.x - nearShoulder.x
   );
 
   const a2 = Math.atan2(
-    farShoulder.y - elbow.y,
-    farShoulder.x - elbow.x
+    elbow.y - nearShoulder.y,
+    elbow.x - nearShoulder.x
   );
 
   let diff = a2 - a1;
@@ -1854,1273 +1885,19 @@ function drawBodyAngleArc(
   ctx.beginPath();
 
   ctx.arc(
-    ex,
-    ey,
+    sx,
+    sy,
     48,
     a1,
     a1 + diff,
     diff < 0
   );
 
-  ctx.strokeStyle = "#ff3030";
+  ctx.strokeStyle = '#ff3030';
   ctx.lineWidth = 5;
   ctx.stroke();
 
   ctx.restore();
-}
-
-
-/* =========================================================
-   각도 라벨
-========================================================= */
-
-/* =========================================================
-   각도 라벨
-========================================================= */
-
-function drawAngleLabel(
-  text,
-  x,
-  y
-){
-
-  ctx.save();
-
-  /*
-    캔버스 전체가 CSS에서 좌우 반전되어 있기 때문에
-    숫자/글자만 한 번 더 좌우 반전해서 그린다.
-    그러면 최종 화면에서는 숫자가 정상 방향으로 보인다.
-  */
-  ctx.translate(2 * x, 0);
-  ctx.scale(-1, 1);
-
-  ctx.font =
-    "bold 20px Arial";
-
-  const width =
-    ctx.measureText(text).width + 20;
-
-  ctx.fillStyle =
-    "rgba(0,0,0,.8)";
-
-  ctx.fillRect(
-    x - width/2,
-    y - 40,
-    width,
-    30
-  );
-
-  ctx.fillStyle =
-    "#ffffff";
-
-  ctx.textAlign =
-    "center";
-
-  ctx.textBaseline =
-    "middle";
-
-  ctx.fillText(
-    text,
-    x,
-    y - 25
-  );
-
-  ctx.restore();
-
-}
-
-/* =========================================================
-   손
-========================================================= */
-
-function drawHands(
-  handList
-){
-
-  const handConnections = [
-
-    [0,1],
-    [1,2],
-    [2,3],
-    [3,4],
-
-    [0,5],
-    [5,6],
-    [6,7],
-    [7,8],
-
-    [0,9],
-    [9,10],
-    [10,11],
-    [11,12],
-
-    [0,13],
-    [13,14],
-    [14,15],
-    [15,16],
-
-    [0,17],
-    [17,18],
-    [18,19],
-    [19,20],
-
-    [5,9],
-    [9,13],
-    [13,17]
-
-  ];
-
-
-  handList.forEach(
-    hand => {
-
-      ctx.strokeStyle =
-        "#ff8a00";
-
-      ctx.lineWidth =
-        5;
-
-
-      handConnections.forEach(
-        pair => {
-
-          const a =
-            hand[pair[0]];
-
-          const b =
-            hand[pair[1]];
-
-
-          if(!a || !b){
-            return;
-          }
-
-
-          ctx.beginPath();
-
-
-          ctx.moveTo(
-            a.x * overlay.width,
-            a.y * overlay.height
-          );
-
-
-          ctx.lineTo(
-            b.x * overlay.width,
-            b.y * overlay.height
-          );
-
-
-          ctx.stroke();
-
-        }
-      );
-
-    }
-  );
-
-}
-
-
-/* =========================================================
-   랜드마크 복사
-========================================================= */
-
-function cloneLandmarks(lm){
-
-  return lm.map(
-    p => ({
-
-      x:p.x,
-
-      y:p.y,
-
-      z:p.z,
-
-      visibility:p.visibility
-
-    })
-  );
-
-}
-
-
-/* =========================================================
-   슛 상태
-========================================================= */
-
-function updateShootPhase(
-  metrics
-){
-
-  const elbow =
-    metrics.elbow;
-
-
-  if(
-    elbow < 150 &&
-    previousElbow === null
-  ){
-
-    phaseBadge.textContent =
-      "팔 올리는 중";
-
-  }
-
-
-  if(
-    elbow >= 105 &&
-    elbow < 125
-  ){
-
-    phaseBadge.textContent =
-      "셋";
-
-  }
-
-
-  /*
-    팔꿈치가 125도 이상 펴지는 순간
-  */
-
-  if(
-    !releaseDetected &&
-    previousElbow !== null &&
-    previousElbow < 125 &&
-    elbow >= 125
-  ){
-
-    releaseDetected =
-      true;
-
-    phaseBadge.textContent =
-      "릴리즈";
-
-  }
-
-
-  if(
-    releaseDetected &&
-    elbow > 125
-  ){
-
-    phaseBadge.textContent =
-      "팔로스루";
-
-  }
-
-
-  previousElbow =
-    elbow;
-
-}
-
-
-/* =========================================================
-   AI 분석 루프
-========================================================= */
-
-async function analysisLoop(){
-
-  if(
-    pose &&
-    liveVideo.readyState >= 2 &&
-    !poseBusy
-  ){
-
-    const now =
-      performance.now();
-
-
-    if(
-      now -
-      lastAnalysisTime >
-      120
-    ){
-
-      lastAnalysisTime =
-        now;
-
-
-      poseBusy =
-        true;
-
-
-      try{
-
-        /*
-          ★ 실제 AI 분석
-        */
-
-        await pose.send({
-
-          image:liveVideo
-
-        });
-
-
-        /*
-          패스에서만 손 분석
-        */
-
-        if(
-          currentMode === "pass" &&
-          hands &&
-          !handsBusy
-        ){
-
-          handsBusy =
-            true;
-
-
-          try{
-
-            await hands.send({
-
-              image:liveVideo
-
-            });
-
-          }catch(error){
-
-            console.error(
-              "손 분석 오류:",
-              error
-            );
-
-          }
-
-
-          handsBusy =
-            false;
-
-        }
-
-      }catch(error){
-
-        console.error(
-          "Pose 분석 오류:",
-          error
-        );
-
-      }
-
-
-      poseBusy =
-        false;
-
-    }
-
-  }
-
-
-  requestAnimationFrame(
-    analysisLoop
-  );
-
-}
-
-
-/* =========================================================
-   촬영 시작
-========================================================= */
-
-startBtn.addEventListener(
-  "click",
-  async () => {
-
-    /*
-      결과 화면에서 다시 촬영
-    */
-
-    if(
-      startBtn.dataset.mode ===
-      "replay"
-    ){
-
-      returnToCamera();
-
-      return;
-
-    }
-
-
-    if(!stream){
-
-      let ok = false;
-
-      try{
-        ok = await startCamera();
-      }catch(error){
-        console.error(error);
-        statusBox.textContent = "카메라 권한을 확인해주세요.";
-        return;
-      }
-
-      if(!ok){
-        return;
-      }
-
-    }
-
-
-    if(recording){
-      return;
-    }
-
-
-    /*
-      초기화
-    */
-
-    samples = [];
-
-    currentPose = null;
-
-    currentHands = [];
-
-    previousElbow = null;
-
-    releaseDetected = false;
-
-    recordedChunks = [];
-
-
-    ctx.clearRect(
-      0,
-      0,
-      overlay.width,
-      overlay.height
-    );
-
-
-    /*
-      라이브 화면
-    */
-
-    recordedVideo.style.display =
-      "none";
-
-    liveVideo.style.display =
-      "block";
-
-
-    liveVideo.srcObject =
-      stream;
-
-
-    try{
-
-      await liveVideo.play();
-
-    }catch(e){}
-
-
-    resizeCanvas();
-
-
-    /*
-      녹화 방식
-    */
-
-    let options = {};
-
-
-    if(
-      MediaRecorder.isTypeSupported(
-        "video/webm;codecs=vp9"
-      )
-    ){
-
-      options = {
-
-        mimeType:
-          "video/webm;codecs=vp9"
-
-      };
-
-    }else if(
-      MediaRecorder.isTypeSupported(
-        "video/webm;codecs=vp8"
-      )
-    ){
-
-      options = {
-
-        mimeType:
-          "video/webm;codecs=vp8"
-
-      };
-
-    }else{
-
-      options = {
-
-        mimeType:
-          "video/webm"
-
-      };
-
-    }
-
-
-    try{
-
-      mediaRecorder =
-        Object.keys(options).length
-          ? new MediaRecorder(stream, options)
-          : new MediaRecorder(stream);
-
-    }catch(error){
-
-      console.error("MediaRecorder 오류:", error);
-
-      try{
-        mediaRecorder = new MediaRecorder(stream);
-      }catch(error2){
-        statusBox.textContent =
-          "이 브라우저에서는 동영상 촬영을 지원하지 않습니다. Chrome 또는 Safari 최신 버전에서 다시 시도해주세요.";
-        startBtn.disabled = false;
-        stopBtn.disabled = true;
-        return;
-      }
-
-    }
-
-
-    mediaRecorder.ondataavailable =
-      event => {
-
-        if(
-          event.data &&
-          event.data.size > 0
-        ){
-
-          recordedChunks.push(
-            event.data
-          );
-
-        }
-
-      };
-
-
-    mediaRecorder.onstop =
-      finishRecording;
-
-
-    /*
-      촬영 시작
-    */
-
-    try{
-
-      mediaRecorder.start(100);
-
-    }catch(error){
-
-      console.error("촬영 시작 오류:", error);
-
-      statusBox.textContent =
-        "촬영을 시작하지 못했습니다. 카메라 권한을 확인하고 다시 눌러주세요.";
-
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
-      return;
-
-    }
-
-
-    recording =
-      true;
-
-
-    recordingStart =
-      performance.now();
-
-
-    startBtn.disabled =
-      true;
-
-
-    startBtn.dataset.mode =
-      "recording";
-
-
-    stopBtn.disabled =
-      false;
-
-
-    recordingBadge.style.display =
-      "block";
-
-
-    phaseBadge.textContent =
-      "준비";
-
-
-    statusBox.textContent =
-      "촬영 중입니다. 동작을 해보세요.";
-
-  }
-);
-
-
-/* =========================================================
-   촬영 종료
-========================================================= */
-
-stopBtn.addEventListener(
-  "click",
-  () => {
-
-    if(
-      !recording ||
-      !mediaRecorder
-    ){
-
-      return;
-
-    }
-
-
-    recording =
-      false;
-
-
-    if(
-      mediaRecorder.state !==
-      "inactive"
-    ){
-
-      mediaRecorder.stop();
-
-    }
-
-
-    stopBtn.disabled =
-      true;
-
-
-    recordingBadge.style.display =
-      "none";
-
-
-    phaseBadge.textContent =
-      "분석 완료";
-
-
-    statusBox.textContent =
-      "촬영 완료! 바로 결과를 계산하고 있습니다.";
-
-  }
-);
-
-
-/* =========================================================
-   촬영 끝
-========================================================= */
-
-function finishRecording(){
-
-  /*
-    녹화 데이터가 있는지 확인
-  */
-
-  if(
-    !recordedChunks.length
-  ){
-
-    statusBox.textContent =
-      "녹화 데이터를 찾지 못했습니다.";
-
-    startBtn.disabled =
-      false;
-
-    startBtn.textContent =
-      "촬영 시작";
-
-    startBtn.dataset.mode =
-      "camera";
-
-    return;
-
-  }
-
-
-  const blob =
-    new Blob(
-      recordedChunks,
-      {
-        type:
-          mediaRecorder.mimeType ||
-          "video/webm"
-      }
-    );
-
-
-  if(recordedURL){
-
-    URL.revokeObjectURL(
-      recordedURL
-    );
-
-  }
-
-
-  recordedURL =
-    URL.createObjectURL(
-      blob
-    );
-
-
-  /*
-    결과 영상 준비
-  */
-
-  recordedVideo.src =
-    recordedURL;
-
-
-  recordedVideo.style.display =
-    "block";
-
-
-  liveVideo.style.display =
-    "none";
-
-
-  /*
-    ★ 여기서 바로 결과 계산
-    video metadata를 기다리지 않음
-  */
-
-  showFinalResults();
-
-
-  /*
-    버튼
-  */
-
-  startBtn.disabled =
-    false;
-
-
-  startBtn.textContent =
-    "다시 촬영";
-
-
-  startBtn.dataset.mode =
-    "replay";
-
-
-  statusBox.textContent =
-    "분석 완료! 오른쪽에서 자세 결과를 확인하세요.";
-
-
-  phaseBadge.textContent =
-    "분석 완료";
-
-
-  /*
-    영상 로딩은 별도로 처리
-  */
-
-  recordedVideo.onloadedmetadata =
-    () => {
-
-      seek.max =
-        recordedVideo.duration || 0;
-
-      seek.value =
-        0;
-
-      seek.disabled =
-        false;
-
-    };
-
-
-  recordedVideo.load();
-
-}
-
-
-/* =========================================================
-   다시 촬영
-========================================================= */
-
-function returnToCamera(){
-
-  recordedVideo.pause();
-
-  recordedVideo.currentTime =
-    0;
-
-
-  recordedVideo.style.display =
-    "none";
-
-
-  liveVideo.style.display =
-    "block";
-
-
-  if(stream){
-
-    liveVideo.srcObject =
-      stream;
-
-
-    liveVideo.play().catch(
-      () => {}
-    );
-
-  }
-
-
-  seek.disabled =
-    true;
-
-
-  seek.value =
-    0;
-
-
-  startBtn.disabled =
-    false;
-
-
-  startBtn.textContent =
-    "촬영 시작";
-
-
-  startBtn.dataset.mode =
-    "camera";
-
-
-  stopBtn.disabled =
-    true;
-
-
-  recordingBadge.style.display =
-    "none";
-
-
-  phaseBadge.textContent =
-    "준비";
-
-
-  statusBox.textContent =
-    "다시 촬영할 준비가 되었습니다.";
-
-
-  ctx.clearRect(
-    0,
-    0,
-    overlay.width,
-    overlay.height
-  );
-
-
-  /*
-    이전 촬영 결과는 초기화
-  */
-
-  resetResults();
-
-}
-
-
-/* =========================================================
-   재생 중 관절 표시
-========================================================= */
-
-recordedVideo.addEventListener(
-  "timeupdate",
-  () => {
-
-    if(
-      recordedVideo.duration
-    ){
-
-      seek.value =
-        recordedVideo.currentTime;
-
-      drawReplayFrame(
-        recordedVideo.currentTime
-      );
-
-    }
-
-  }
-);
-
-
-/* =========================================================
-   슬라이더
-========================================================= */
-
-seek.addEventListener(
-  "input",
-  () => {
-
-    recordedVideo.currentTime =
-      Number(
-        seek.value
-      );
-
-
-    drawReplayFrame(
-      Number(
-        seek.value
-      )
-    );
-
-  }
-);
-
-
-/* =========================================================
-   녹화 영상의 관절선
-========================================================= */
-
-function drawReplayFrame(
-  time
-){
-
-  if(
-    !samples.length
-  ){
-
-    return;
-
-  }
-
-
-  let closest =
-    samples[0];
-
-
-  let difference =
-    Math.abs(
-      samples[0].time -
-      time
-    );
-
-
-  for(
-    let i=1;
-    i<samples.length;
-    i++
-  ){
-
-    const d =
-      Math.abs(
-        samples[i].time -
-        time
-      );
-
-
-    if(
-      d < difference
-    ){
-
-      difference =
-        d;
-
-      closest =
-        samples[i];
-
-    }
-
-  }
-
-
-  if(closest){
-
-    currentPose =
-      closest.landmarks;
-
-
-    drawPose(
-      closest.landmarks,
-      currentMode === "pass"
-        ? currentHands
-        : []
-    );
-
-  }
-
-}
-
-
-/* =========================================================
-   슛 결과
-========================================================= */
-
-function analyzeShootResult(){
-
-  if(
-    !samples.length
-  ){
-
-    setText(
-      "scoreNumber",
-      "0"
-    );
-
-    return;
-
-  }
-
-
-  /*
-    릴리즈 순간 찾기
-  */
-
-  let releaseIndex =
-    -1;
-
-
-  for(
-    let i=1;
-    i<samples.length;
-    i++
-  ){
-
-    if(
-      samples[i-1].elbow < 125 &&
-      samples[i].elbow >= 125
-    ){
-
-      releaseIndex =
-        i;
-
-      break;
-
-    }
-
-  }
-
-
-  /*
-    못 찾으면 가장 팔이 많이 펴진 순간
-  */
-
-  if(
-    releaseIndex === -1
-  ){
-
-    let max =
-      -Infinity;
-
-
-    samples.forEach(
-      (sample,index) => {
-
-        if(
-          sample.elbow > max
-        ){
-
-          max =
-            sample.elbow;
-
-          releaseIndex =
-            index;
-
-        }
-
-      }
-    );
-
-  }
-
-
-  const release =
-    samples[
-      releaseIndex
-    ];
-
-
-  const finish =
-    samples[
-      samples.length - 1
-    ];
-
-
-  const elbow =
-    release.elbow;
-
-
-  const knee =
-    release.knee;
-
-
-  const armAngle =
-    release.releaseAngle;
-
-
-  const rise =
-    Math.max(
-      0,
-      ...samples.map(
-        s => s.rise
-      )
-    );
-
-
-  const follow =
-    finish.elbow;
-
-
-  /*
-    팔로스루 구간은 마지막 25%를 사용한다.
-    마지막 한 프레임만 보면 MediaPipe가 순간적으로 튄 값에
-    영향을 받을 수 있으므로 중앙값을 사용한다.
-  */
-  const followStart = Math.max(0, Math.floor(samples.length * .75));
-  const followSamples = samples.slice(followStart);
-
-  const followArmGaps = followSamples.map(s => {
-    const lm = s.landmarks;
-    if(!lm || lm.length < 29) return null;
-    const ls = lm[11], le = lm[13], lw = lm[15];
-    const rs = lm[12], re = lm[14], rw = lm[16];
-    if(!ls || !le || !lw || !rs || !re || !rw) return null;
-    const shoulderWidth = Math.max(0.04, distance(ls, rs));
-    const elbowGap = distance(le, re) / shoulderWidth;
-    const wristGap = distance(lw, rw) / shoulderWidth;
-    return { elbowGap, wristGap, combinedGap: Math.max(elbowGap, wristGap) };
-  }).filter(Boolean);
-
-  const followArmGap = followArmGaps.length
-    ? median(followArmGaps.map(v => v.combinedGap))
-    : 0;
-
-  /*
-    투핸드 슛에서만 팔 벌어짐을 평가한다.
-    원핸드는 이 항목을 점수에서 제외한다.
-
-    1.50 이하 : 팔이 크게 벌어지지 않음
-    1.50~1.80 : 경계
-    1.80 초과 : 팔이 많이 벌어짐
-  */
-  const twoHandArmOK = followArmGap <= 1.50;
-  const twoHandArmBorder = followArmGap > 1.50 && followArmGap <= 1.80;
-
-  const elbowOK = elbow >= 125;
-
-  const kneeOK =
-    knee >= 120 &&
-    knee <= 175;
-
-  const followExtensionOK = follow >= 125;
-
-  /*
-    기존 40/30/30 구조를 유지하되,
-    투핸드에서는 팔로스루 30점을
-    '팔이 제대로 펴졌는지 20점 + 양팔이 과하게 벌어지지 않았는지 10점'으로 나눈다.
-    원핸드는 팔 벌어짐 10점을 자동으로 통과시킨다.
-  */
-  let score = 0;
-
-  if(elbowOK) score += 40;
-  if(kneeOK) score += 30;
-  if(followExtensionOK) score += 20;
-
-  if(shootType === "two") {
-    if(twoHandArmOK) score += 10;
-  } else {
-    score += 10;
-  }
-
-  const followOK = followExtensionOK &&
-    (shootType === "one" || twoHandArmOK);
-
-
-  setText(
-    "scoreNumber",
-    score
-  );
-
-
-  setText(
-    "releaseTime",
-    `${release.time.toFixed(2)}초`
-  );
-
-
-  setText(
-    "shootElbow",
-    `${Math.round(elbow)}°`
-  );
-
-
-  setText(
-    "shootKnee",
-    `${Math.round(knee)}°`
-  );
-
-
-  setText(
-    "releaseAngle",
-    `${Math.round(armAngle)}°`
-  );
-
-
-  setText(
-    "riseAmount",
-    `${rise.toFixed(1)}%`
-  );
-
-
-  setText(
-    "followThrough",
-    `${Math.round(follow)}°`
-  );
-
-  setText(
-    "followArmGap",
-    shootType === "two"
-      ? `${followArmGap.toFixed(2)}배`
-      : "원핸드 - 제외"
-  );
-
-
-  setCheck(
-    "shootCheck1",
-    elbowOK
-  );
-
-
-  setCheck(
-    "shootCheck2",
-    kneeOK
-  );
-
-
-  setCheck(
-    "shootCheck3",
-    followExtensionOK
-  );
-
-  const twoHandCheckRow = document.getElementById("twoHandCheckRow");
-  if(twoHandCheckRow){
-    twoHandCheckRow.style.display = shootType === "two" ? "flex" : "none";
-  }
-
-  if(shootType === "two") {
-    setCheck("shootCheck4", twoHandArmOK);
-    if(twoHandArmBorder){
-      const el = document.getElementById("shootCheck4");
-      if(el){
-        el.textContent = "△ 조금 모으기";
-        el.className = "no";
-      }
-    }
-  }
-
 }
 
 
@@ -3274,21 +2051,28 @@ function handDistanceScore(ratio){
 function analyzePassResult(){
 
   if(!samples || !samples.length){
-    setText("scoreNumber", "0");
-    setText("passStartElbow", "측정 실패");
-    setText("passFinishElbow", "측정 실패");
-    setText("passElbowChange", "-");
-    setText("passHandDistance", "-");
+    setText('scoreNumber', '0');
+    setText('passStartElbow', '측정 실패');
+    setText('passFinishElbow', '측정 실패');
+    setText('passElbowChange', '-');
+    setText('passLateBodyAngle', '-');
+    setText('passHandDistance', '-');
     return;
   }
 
-  // 촬영 시작 직후 30%를 시작 자세 구간으로 사용한다.
-  // 최소 1개라도 있으면 계산하고, 데이터가 적을 때 억지로 8개를 요구하지 않는다.
+  // 촬영 초반 30% = 패스 준비 자세
   const earlyCount = Math.max(1, Math.min(30, Math.floor(samples.length * 0.30) || 1));
   const early = samples.slice(0, earlyCount);
 
-  const lateStart = Math.min(samples.length - 1, Math.floor(samples.length * 0.68));
+  // ★ 핵심: 패스 직전 구간도 별도로 본다.
+  // 아이들이 처음에는 팔꿈치를 붙였다가 던지기 직전에 팔꿈치를 벌리는 경우를 잡기 위해
+  // 마지막 32%의 '빨간 각도(먼 어깨-가까운 어깨-팔꿈치)' 최대값을 사용한다.
+  const lateStart = Math.min(samples.length - 1, Math.floor(samples.length * 0.40));
   const late = samples.slice(lateStart);
+
+  // 패스 동작은 촬영 끝부분에만 일어난다고 가정하지 않는다.
+  // 준비 자세 이후 실제 동작 구간 전체에서 빨간 각도의 최고값을 찾는다.
+  // 따라서 '처음엔 붙였다가 던지기 직전에 확 벌리는' 순간도 놓치지 않는다.
 
   const earlyMetrics = early
     .map(s => getPassFrameMetrics(s.landmarks))
@@ -3296,15 +2080,15 @@ function analyzePassResult(){
 
   const lateMetrics = late
     .map(s => getPassFrameMetrics(s.landmarks))
-    .filter(Boolean);
+    .filter(m => m && Number.isFinite(m.elbowBodyAngle));
 
-  // 시작 자세 측정값이 있으면 반드시 그 값으로 점수를 만든다.
   if(!earlyMetrics.length){
-    setText("scoreNumber", "0");
-    setText("passStartElbow", "측정 실패");
-    setText("passFinishElbow", "측정 실패");
-    setText("passElbowChange", "-");
-    setText("passHandDistance", "-");
+    setText('scoreNumber', '0');
+    setText('passStartElbow', '측정 실패');
+    setText('passFinishElbow', '측정 실패');
+    setText('passElbowChange', '-');
+    setText('passLateBodyAngle', '측정 실패');
+    setText('passHandDistance', '-');
     return;
   }
 
@@ -3326,43 +2110,91 @@ function analyzePassResult(){
     earlyMetrics.map(m => m.elbow).filter(Number.isFinite)
   );
 
+  // 준비 자세 이후 빨간 각도의 최대값을 사용한다.
+  // 단 한 순간이라도 크게 벌어지면 '팔꿈치 벌어짐'으로 판정한다.
+  const postStartAngles = samples
+    .slice(split)
+    .map(s => getPassFrameMetrics(s.landmarks))
+    .filter(m => m && Number.isFinite(m.elbowBodyAngle))
+    .map(m => m.elbowBodyAngle);
+
+  const lateBodyAngle = postStartAngles.length
+    ? Math.max(...postStartAngles)
+    : startBodyAngle;
+
   const elbowChange = Number.isFinite(finishElbow) && Number.isFinite(startElbow)
     ? finishElbow - startElbow
     : 0;
 
-  // ★ 핵심: 빨간색으로 화면에 표시하는 바로 그 각도가 점수의 60점
+  // 시작 자세: 90~120°가 정상 범위
   const startScore = passAngleScore(startBodyAngle);
+
+  // 패스 직전 팔꿈치 벌어짐: 120° 이하를 유지하면 만점.
+  // 120~150°는 단계적으로 감점, 150° 이상은 큰 감점.
+  let flareScore = 25;
+  if(lateBodyAngle <= 120){
+    flareScore = 25;
+  }else if(lateBodyAngle <= 135){
+    flareScore = 25 - (lateBodyAngle - 120) * (10 / 15);
+  }else if(lateBodyAngle <= 150){
+    flareScore = 15 - (lateBodyAngle - 135);
+  }else{
+    flareScore = 0;
+  }
+
   const finishScore = finishElbowScore(finishElbow);
   const handScore = handDistanceScore(finishHandDistance);
 
-  const score = Math.round(
-    Math.max(0, Math.min(100, startScore + finishScore + handScore))
-  );
+  let score = startScore + flareScore + finishScore * 0.6 + handScore * 0.6;
+
+  // 팔꿈치를 던지기 직전에 벌린 경우는 단순 가산점 문제가 아니라
+  // 패스 자세의 핵심 오류이므로 총점을 강제로 제한한다.
+  if(lateBodyAngle > 150){
+    score = Math.min(score, 55);
+  }else if(lateBodyAngle > 135){
+    score = Math.min(score, 70);
+  }
+
+  score = Math.round(Math.max(0, Math.min(100, score)));
 
   const startOK = startBodyAngle >= 90 && startBodyAngle <= 120;
+  const flareOK = lateBodyAngle <= 125;
   const finishOK = finishElbow >= 145;
   const handOK = finishHandDistance <= 0.95;
 
-  setText("scoreNumber", score);
-  setText("passStartElbow", `${Math.round(startBodyAngle)}°`);
-  setText("passFinishElbow", `${Math.round(finishElbow)}°`);
-  setText("passElbowChange", `${Math.round(elbowChange)}°`);
-  setText("passHandDistance", `${Math.round(finishHandDistance * 100)}%`);
+  setText('scoreNumber', score);
+  setText('passStartElbow', `${Math.round(startBodyAngle)}°`);
+  setText('passFinishElbow', `${Math.round(finishElbow)}°`);
+  setText('passElbowChange', `${Math.round(elbowChange)}°`);
+  setText('passLateBodyAngle', `${Math.round(lateBodyAngle)}°`);
+  setText('passHandDistance', `${Math.round(finishHandDistance * 100)}%`);
 
-  setCheck("passCheck1", startOK);
-  setCheck("passCheck2", finishOK);
-  setCheck("passCheck3", handOK);
+  setCheck('passCheck1', startOK);
+  setCheck('passCheck2', finishOK);
+  setCheck('passCheck3', handOK);
+  setCheck('passCheckElbowFlare', flareOK);
 
-  const check1 = document.getElementById("passCheck1");
+  const check1 = document.getElementById('passCheck1');
   if(check1){
     if(startOK){
       check1.textContent = `✓ ${Math.round(startBodyAngle)}° 좋음`;
-      check1.className = "ok";
+      check1.className = 'ok';
     }else{
       check1.textContent = startBodyAngle > 120
-        ? `✕ ${Math.round(startBodyAngle)}° — 팔꿈치가 너무 벌어짐`
+        ? `✕ ${Math.round(startBodyAngle)}° — 시작할 때 팔꿈치가 벌어짐`
         : `✕ ${Math.round(startBodyAngle)}° — 90° 이상 권장`;
-      check1.className = "no";
+      check1.className = 'no';
+    }
+  }
+
+  const flareCheck = document.getElementById('passCheckElbowFlare');
+  if(flareCheck){
+    if(flareOK){
+      flareCheck.textContent = `✓ ${Math.round(lateBodyAngle)}° 유지`;
+      flareCheck.className = 'ok';
+    }else{
+      flareCheck.textContent = `✕ ${Math.round(lateBodyAngle)}° — 던지기 직전 팔꿈치 벌어짐`;
+      flareCheck.className = 'no';
     }
   }
 
