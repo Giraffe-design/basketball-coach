@@ -167,6 +167,9 @@ button{
 }
 
 #startBtn{
+  position:relative;
+  z-index:50;
+  pointer-events:auto;
   background:#2563eb;
   color:white;
   flex:1;
@@ -955,36 +958,46 @@ let releaseDetected = false;
    MediaPipe Pose
 ========================================================= */
 
-const pose = new Pose({
+let pose = null;
 
-  /*
-    ★ 여기 중요
-    return 뒤에 줄바꿈이 있으면 안 됨.
-  */
+try{
 
-  locateFile: file => {
-    return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+  if(typeof Pose === "function"){
+
+    pose = new Pose({
+
+      locateFile:file => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+      }
+
+    });
+
   }
 
-});
+}catch(error){
+
+  console.error("Pose 초기화 오류:", error);
+
+}
 
 
-pose.setOptions({
+if(pose){
 
-  modelComplexity:1,
+  pose.setOptions({
 
-  smoothLandmarks:true,
+    modelComplexity:1,
+    smoothLandmarks:true,
+    enableSegmentation:false,
+    smoothSegmentation:false,
+    minDetectionConfidence:.5,
+    minTrackingConfidence:.5
 
-  enableSegmentation:false,
+  });
 
-  smoothSegmentation:false,
+}
 
-  minDetectionConfidence:.5,
 
-  minTrackingConfidence:.5
-
-});
-
+if(pose){
 
 pose.onResults(
   results => {
@@ -1071,32 +1084,47 @@ pose.onResults(
   }
 );
 
+}
+
 
 /* =========================================================
    MediaPipe Hands
 ========================================================= */
 
-const hands = new Hands({
+let hands = null;
 
-  locateFile:file => {
-    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+try{
+
+  if(typeof Hands === "function"){
+
+    hands = new Hands({
+      locateFile:file => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+      }
+    });
+
   }
 
-});
+}catch(error){
+
+  console.error("Hands 초기화 오류:", error);
+
+}
 
 
-hands.setOptions({
+if(hands){
 
-  maxNumHands:2,
+  hands.setOptions({
+    maxNumHands:2,
+    modelComplexity:0,
+    minDetectionConfidence:.5,
+    minTrackingConfidence:.5
+  });
 
-  modelComplexity:0,
+}
 
-  minDetectionConfidence:.5,
 
-  minTrackingConfidence:.5
-
-});
-
+if(hands){
 
 hands.onResults(
   results => {
@@ -1116,12 +1144,21 @@ hands.onResults(
   }
 );
 
+}
+
 
 /* =========================================================
    카메라
 ========================================================= */
 
 async function startCamera(){
+
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+
+    statusBox.textContent = "이 브라우저에서는 카메라 기능을 사용할 수 없습니다. Chrome 또는 Edge에서 HTTPS로 열어주세요.";
+    return false;
+
+  }
 
   if(stream){
 
@@ -2010,6 +2047,7 @@ function updateShootPhase(
 async function analysisLoop(){
 
   if(
+    pose &&
     liveVideo.readyState >= 2 &&
     !poseBusy
   ){
@@ -2051,6 +2089,7 @@ async function analysisLoop(){
 
         if(
           currentMode === "pass" &&
+          hands &&
           !handsBusy
         ){
 
@@ -2132,9 +2171,15 @@ startBtn.addEventListener(
 
     if(!stream){
 
-      const ok =
-        await startCamera();
+      let ok = false;
 
+      try{
+        ok = await startCamera();
+      }catch(error){
+        console.error(error);
+        statusBox.textContent = "카메라 권한을 확인해주세요.";
+        return;
+      }
 
       if(!ok){
         return;
@@ -3720,19 +3765,29 @@ stopBtn.disabled =
 
 
 /*
-  카메라 시작
+  시작
 */
 
-startCamera();
+(async function(){
 
+  try{
 
-/*
-  AI 분석 시작
-*/
+    const ok = await startCamera();
 
-requestAnimationFrame(
-  analysisLoop
-);
+    if(ok){
+      statusBox.textContent = "카메라 준비 완료. 촬영 시작을 눌러주세요.";
+    }
+
+  }catch(error){
+
+    console.error(error);
+    statusBox.textContent = "카메라를 준비하지 못했습니다. 브라우저의 카메라 권한을 확인해주세요.";
+
+  }
+
+  requestAnimationFrame(analysisLoop);
+
+})();
 
 </script>
 
