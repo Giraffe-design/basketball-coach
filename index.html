@@ -3163,19 +3163,19 @@ function getPassFrameMetrics(lm){
     return null;
   }
 
-  // 패스에서는 '카메라에 가까운 쪽'을 어깨의 visibility로 고정한다.
-  // 매 프레임 getSide()를 다시 계산하면 좌우가 뒤집히면서
-  // 서로 다른 팔꿈치가 선택될 수 있으므로, 어깨 visibility를 우선한다.
+  // 패스 시작 자세에서는 '카메라에 가까운 어깨-팔꿈치' 쪽을 사용한다.
+  // MediaPipe의 z값은 카메라에 가까울수록 작아지는 특성이 있으므로
+  // visibility보다 z를 우선한다. z가 없거나 거의 같으면 visibility를 보조로 사용한다.
+  const leftZ = Number.isFinite(ls.z) ? ls.z : 0;
+  const rightZ = Number.isFinite(rs.z) ? rs.z : 0;
   const leftShoulderVis = ls.visibility || 0;
   const rightShoulderVis = rs.visibility || 0;
-  const leftElbowVis = le.visibility || 0;
-  const rightElbowVis = re.visibility || 0;
 
   let nearIsLeft;
-  if(Math.abs(leftShoulderVis - rightShoulderVis) > 0.05){
-    nearIsLeft = leftShoulderVis > rightShoulderVis;
+  if(Math.abs(leftZ - rightZ) > 0.015){
+    nearIsLeft = leftZ < rightZ;
   }else{
-    nearIsLeft = leftElbowVis >= rightElbowVis;
+    nearIsLeft = leftShoulderVis >= rightShoulderVis;
   }
 
   const nearShoulder = nearIsLeft ? ls : rs;
@@ -3226,32 +3226,83 @@ function median(arr){
 }
 
 
+function passAngleScore(deg){
+
+  // 사용자가 지정한 기준:
+  // 90~120° = 좋은 시작 자세
+  // 180°에 가까울수록 잘못된 자세
+  if(!Number.isFinite(deg)) return 0;
+
+  if(deg >= 90 && deg <= 120){
+    // 105°를 가장 좋은 중앙값으로 두고 90~120° 안에서는 55~60점
+    return 60 - Math.abs(deg - 105) * 0.25;
+  }
+
+  if(deg < 90){
+    // 90°보다 작아질수록 완만하게 감점
+    return Math.max(0, 55 - (90 - deg) * 1.1);
+  }
+
+  // 120°보다 커질수록, 특히 180°에 가까워질수록 강하게 감점
+  return Math.max(0, 60 - (deg - 120) * 1.5);
+
+}
+
+function finishElbowScore(deg){
+
+  if(!Number.isFinite(deg)) return 0;
+  if(deg >= 160) return 25;
+  if(deg >= 145) return 22 + Math.min(3, (deg - 145) * 0.2);
+  if(deg >= 120) return 12 + (deg - 120) * 0.4;
+  return Math.max(0, (deg - 80) * 0.15);
+
+}
+
+function handDistanceScore(ratio){
+
+  if(!Number.isFinite(ratio)) return 0;
+
+  // 두 손이 너무 벌어지지 않는 것이 목표. 0.65~0.95 정도를 안정 구간으로 본다.
+  if(ratio <= 0.95) return 15;
+  if(ratio <= 1.20) return 15 - (ratio - 0.95) * 25;
+  return Math.max(0, 8.75 - (ratio - 1.20) * 20);
+
+}
+
 function analyzePassResult(){
 
-  if(!samples.length){
+  if(!samples || !samples.length){
     setText("scoreNumber", "0");
+    setText("passStartElbow", "측정 실패");
+    setText("passFinishElbow", "측정 실패");
+    setText("passElbowChange", "-");
+    setText("passHandDistance", "-");
     return;
   }
 
-  // 시작 자세는 '촬영 직후'의 안정된 구간을 본다.
-  // 너무 긴 초반 구간을 쓰면 학생이 이미 패스를 시작한 뒤의 자세가
-  // 섞여서 좋은 자세와 나쁜 자세가 비슷하게 계산될 수 있다.
-  const earlyCount = Math.max(8, Math.min(30, Math.floor(samples.length * 0.30)));
+  // 촬영 시작 직후 30%를 시작 자세 구간으로 사용한다.
+  // 최소 1개라도 있으면 계산하고, 데이터가 적을 때 억지로 8개를 요구하지 않는다.
+  const earlyCount = Math.max(1, Math.min(30, Math.floor(samples.length * 0.30) || 1));
   const early = samples.slice(0, earlyCount);
 
-  const lateStart = Math.max(0, Math.floor(samples.length * 0.68));
+  const lateStart = Math.min(samples.length - 1, Math.floor(samples.length * 0.68));
   const late = samples.slice(lateStart);
 
   const earlyMetrics = early
     .map(s => getPassFrameMetrics(s.landmarks))
-    .filter(Boolean);
+    .filter(m => m && Number.isFinite(m.elbowBodyAngle));
 
   const lateMetrics = late
     .map(s => getPassFrameMetrics(s.landmarks))
     .filter(Boolean);
 
+  // 시작 자세 측정값이 있으면 반드시 그 값으로 점수를 만든다.
   if(!earlyMetrics.length){
     setText("scoreNumber", "0");
+    setText("passStartElbow", "측정 실패");
+    setText("passFinishElbow", "측정 실패");
+    setText("passElbowChange", "-");
+    setText("passHandDistance", "-");
     return;
   }
 
@@ -3262,51 +3313,33 @@ function analyzePassResult(){
   const finishSource = lateMetrics.length ? lateMetrics : earlyMetrics;
 
   const finishElbow = median(
-    finishSource.map(m => m.elbow)
+    finishSource.map(m => m.elbow).filter(Number.isFinite)
   );
 
   const finishHandDistance = median(
-    finishSource.map(m => m.handDistance)
+    finishSource.map(m => m.handDistance).filter(Number.isFinite)
   );
 
   const startElbow = median(
-    earlyMetrics.map(m => m.elbow)
+    earlyMetrics.map(m => m.elbow).filter(Number.isFinite)
   );
 
-  const elbowChange = finishElbow - startElbow;
+  const elbowChange = Number.isFinite(finishElbow) && Number.isFinite(startElbow)
+    ? finishElbow - startElbow
+    : 0;
 
-  // ========================================================
-  // ★ 패스 시작 자세 점수
-  // 가까운 어깨 → 팔꿈치 → 먼 어깨
-  // 90~120°가 목표. 180°에 가까울수록 감점.
-  // 연속 점수로 계산해서 100°와 150°가 같은 점수가 나오지 않게 한다.
-  // ========================================================
-  let startScore;
-
-  if(startBodyAngle >= 90 && startBodyAngle <= 120){
-    // 목표 구간 안에서는 중앙값 105°에 가까울수록 만점
-    const centerDistance = Math.abs(startBodyAngle - 105);
-    startScore = 60 - Math.min(10, centerDistance * 0.67);
-  }else if(startBodyAngle < 90){
-    // 90°보다 작으면 90°에서 멀어질수록 감점
-    startScore = 50 - Math.min(50, (90 - startBodyAngle) * 1.25);
-  }else{
-    // 120°보다 크면 180°에 가까워질수록 강하게 감점
-    startScore = 60 - Math.min(60, (startBodyAngle - 120) * 1.0);
-  }
-
-  startScore = Math.max(0, Math.min(60, startScore));
-
-  const startOK = startBodyAngle >= 90 && startBodyAngle <= 120;
-
-  const finishOK = finishElbow >= 145 && elbowChange >= 12;
-  const handOK = finishHandDistance <= 0.95;
+  // ★ 핵심: 빨간색으로 화면에 표시하는 바로 그 각도가 점수의 60점
+  const startScore = passAngleScore(startBodyAngle);
+  const finishScore = finishElbowScore(finishElbow);
+  const handScore = handDistanceScore(finishHandDistance);
 
   const score = Math.round(
-    startScore +
-    (finishOK ? 25 : 0) +
-    (handOK ? 15 : 0)
+    Math.max(0, Math.min(100, startScore + finishScore + handScore))
   );
+
+  const startOK = startBodyAngle >= 90 && startBodyAngle <= 120;
+  const finishOK = finishElbow >= 145;
+  const handOK = finishHandDistance <= 0.95;
 
   setText("scoreNumber", score);
   setText("passStartElbow", `${Math.round(startBodyAngle)}°`);
@@ -3321,12 +3354,12 @@ function analyzePassResult(){
   const check1 = document.getElementById("passCheck1");
   if(check1){
     if(startOK){
-      check1.textContent = "✓ 90~120° 좋음";
+      check1.textContent = `✓ ${Math.round(startBodyAngle)}° 좋음`;
       check1.className = "ok";
     }else{
       check1.textContent = startBodyAngle > 120
-        ? "✕ 팔꿈치를 몸 가까이"
-        : "✕ 90° 이상으로";
+        ? `✕ ${Math.round(startBodyAngle)}° — 팔꿈치가 너무 벌어짐`
+        : `✕ ${Math.round(startBodyAngle)}° — 90° 이상 권장`;
       check1.className = "no";
     }
   }
