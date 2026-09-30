@@ -1743,6 +1743,13 @@ function drawPose(
 
   /*
     각도 표시
+
+    ★ 슛:
+    어깨-팔꿈치-손목 각도
+
+    ★ 패스:
+    가까운 어깨 → 팔꿈치 → 먼 어깨 각도
+    (팔꿈치를 꼭짓점으로 양쪽 어깨를 연결한 각도)
   */
 
   const metrics =
@@ -1751,29 +1758,42 @@ function drawPose(
 
   if(metrics){
 
+    if(currentMode === "pass"){
+
+      const passMetrics =
+        getPassFrameMetrics(lm);
+
+      if(passMetrics){
+
+        drawBodyAngleArc(
+          passMetrics.nearShoulder,
+          passMetrics.nearElbow,
+          passMetrics.farShoulder
+        );
+
+        drawAngleLabel(
+          `${Math.round(passMetrics.elbowBodyAngle)}°`,
+          passMetrics.nearElbow.x * overlay.width,
+          passMetrics.nearElbow.y * overlay.height
+        );
+
+      }
+
+    }else{
+
+      drawAngleLabel(
+        `${Math.round(metrics.elbow)}°`,
+        metrics.elbowPoint.x * overlay.width,
+        metrics.elbowPoint.y * overlay.height
+      );
+
+    }
+
+
     drawAngleLabel(
-
-      `${Math.round(metrics.elbow)}°`,
-
-      metrics.elbowPoint.x *
-        overlay.width,
-
-      metrics.elbowPoint.y *
-        overlay.height
-
-    );
-
-
-    drawAngleLabel(
-
       `${Math.round(metrics.knee)}°`,
-
-      metrics.kneePoint.x *
-        overlay.width,
-
-      metrics.kneePoint.y *
-        overlay.height
-
+      metrics.kneePoint.x * overlay.width,
+      metrics.kneePoint.y * overlay.height
     );
 
   }
@@ -1797,6 +1817,62 @@ function drawPose(
 
 }
 
+
+/* =========================================================
+   패스 팔꿈치-양어깨 각도 표시
+========================================================= */
+
+function drawBodyAngleArc(
+  nearShoulder,
+  elbow,
+  farShoulder
+){
+
+  if(!nearShoulder || !elbow || !farShoulder){
+    return;
+  }
+
+  const ex = elbow.x * overlay.width;
+  const ey = elbow.y * overlay.height;
+
+  const a1 = Math.atan2(
+    nearShoulder.y - elbow.y,
+    nearShoulder.x - elbow.x
+  );
+
+  const a2 = Math.atan2(
+    farShoulder.y - elbow.y,
+    farShoulder.x - elbow.x
+  );
+
+  let diff = a2 - a1;
+
+  while(diff > Math.PI) diff -= Math.PI * 2;
+  while(diff < -Math.PI) diff += Math.PI * 2;
+
+  ctx.save();
+  ctx.beginPath();
+
+  ctx.arc(
+    ex,
+    ey,
+    48,
+    a1,
+    a1 + diff,
+    diff < 0
+  );
+
+  ctx.strokeStyle = "#ff3030";
+  ctx.lineWidth = 5;
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+
+/* =========================================================
+   각도 라벨
+========================================================= */
 
 /* =========================================================
    각도 라벨
@@ -3139,6 +3215,9 @@ function getPassFrameMetrics(lm){
     elbow: getSide(lm) === "left" ? leftElbow : rightElbow,
     avgElbow: (leftElbow + rightElbow) / 2,
     elbowBodyAngle,
+    nearShoulder,
+    nearElbow,
+    farShoulder,
     handDistance
   };
 
@@ -3178,11 +3257,12 @@ function analyzePassResult(){
     이제 시작 자세의 핵심 기준을
     '어깨 - 팔꿈치 - 손목 각도'로 판단한다.
 
-    팔꿈치를 몸에 붙이고 팔을 접은 시작 자세
-      → 어깨-팔꿈치-손목 각도가 작음
+    시작 자세의 핵심은
+      '가까운 어깨-팔꿈치-먼 어깨' 각도이다.
 
-    팔꿈치를 벌리고 시작
-      → 어깨-팔꿈치-손목 각도가 커짐
+    90~120° 정도면 좋은 시작 자세로 보고,
+    180°에 가까워질수록 팔꿈치가 몸에서
+    크게 벌어진 것으로 본다.
   */
 
   const earlyCount =
@@ -3280,33 +3360,71 @@ function analyzePassResult(){
     시작 자세 판정
     =========================================================
 
-    사용자가 지정한 기준:
-    '가까운 어깨 - 팔꿈치 - 먼 어깨' 각도.
+    ★ 사용자가 지정한 정확한 기준
 
-    이 각도는 팔꿈치를 꼭짓점으로 본다.
-    각도가 작으면 팔꿈치가 몸 가까이에 있고,
-    각도가 커지면 팔꿈치가 옆으로 떨어져 있는 것으로 본다.
+    가까운 어깨 → 팔꿈치 → 먼 어깨
 
-    ≤ 45° : 붙인 시작 자세
-    45~60° : 경계
-    > 60° : 팔꿈치가 떨어진 시작 자세
+    이 각도가
+      90° ~ 120° : 좋은 시작 자세
+      80° ~ 90°  또는 120° ~ 140° : 경계
+      그 밖의 범위 : 감점
+
+    특히 180°에 가까울수록
+    팔꿈치가 몸에서 크게 벌어진 것으로 보고
+    점수를 낮춘다.
   */
 
   const startBodyAngle =
-    median(earlyMetrics.map(m => m.elbowBodyAngle));
+    median(
+      earlyMetrics.map(
+        m => m.elbowBodyAngle
+      )
+    );
 
   let startScore = 0;
   let startOK = false;
 
-  if(startBodyAngle <= 45){
+  if(
+    startBodyAngle >= 90 &&
+    startBodyAngle <= 120
+  ){
+
     startScore = 50;
     startOK = true;
-  }else if(startBodyAngle <= 60){
-    startScore = 25;
+
+  }else if(
+    (
+      startBodyAngle >= 80 &&
+      startBodyAngle < 90
+    ) ||
+    (
+      startBodyAngle > 120 &&
+      startBodyAngle <= 140
+    )
+  ){
+
+    startScore = 30;
     startOK = false;
+
+  }else if(
+    (
+      startBodyAngle >= 70 &&
+      startBodyAngle < 80
+    ) ||
+    (
+      startBodyAngle > 140 &&
+      startBodyAngle <= 155
+    )
+  ){
+
+    startScore = 15;
+    startOK = false;
+
   }else{
+
     startScore = 0;
     startOK = false;
+
   }
 
 
@@ -3339,9 +3457,10 @@ function analyzePassResult(){
     팔을 앞으로 펴기 30점
     패스 후 손 모양 20점
 
-    ★ 시작 자세가 잘못되면 최대 50점까지만 가능하다.
-    따라서 팔꿈치를 벌리고 시작한 뒤 패스 동작만 잘해도
-    정상적인 시작 자세보다 높은 점수가 나오는 문제가 없어졌다.
+    ★ 시작 자세 점수는
+      '가까운 어깨-팔꿈치-먼 어깨' 각도로 판정한다.
+      90~120°가 가장 좋은 구간이며
+      180°에 가까울수록 점수가 내려간다.
   */
 
   const score =
@@ -3409,12 +3528,20 @@ function analyzePassResult(){
 
   if(
     check1 &&
-    startBodyAngle > 45 &&
-    startBodyAngle <= 60
+    (
+      (
+        startBodyAngle >= 80 &&
+        startBodyAngle < 90
+      ) ||
+      (
+        startBodyAngle > 120 &&
+        startBodyAngle <= 140
+      )
+    )
   ){
 
     check1.textContent =
-      "△ 조금 더 붙이기";
+      "△ 90~120°에 맞추기";
 
     check1.className =
       "no";
