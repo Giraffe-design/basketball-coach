@@ -3183,13 +3183,15 @@ function getPassFrameMetrics(lm){
   const nearElbow    = nearIsLeft ? le : re;
   const nearWrist    = nearIsLeft ? lw : rw;
 
-  // ★ 사용자가 지정한 바로 그 각도
-  // 가까운 어깨 → 팔꿈치 → 먼 어깨
-  // 꼭짓점은 '팔꿈치'이다.
+  // ★ 사용자가 사진에서 표시한 빨간 각도
+  // 꼭짓점은 팔꿈치가 아니라 '가까운 어깨'이다.
+  // 먼 어깨 → 가까운 어깨 → 팔꿈치
+  // 팔을 몸 옆으로 자연스럽게 내리면 약 90°가 나오고,
+  // 팔꿈치를 몸통에서 앞으로/바깥으로 벌릴수록 각도가 커진다.
   const elbowBodyAngle = angle(
+    farShoulder,
     nearShoulder,
-    nearElbow,
-    farShoulder
+    nearElbow
   );
 
   const leftElbow = angle(ls, le, lw);
