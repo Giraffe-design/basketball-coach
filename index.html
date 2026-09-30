@@ -44,7 +44,7 @@ header p{
 }
 
 .container{
-  max-width:1400px;
+  max-width:1800px;
   margin:22px auto;
   padding:0 18px;
 }
@@ -73,7 +73,7 @@ header p{
 
 .layout{
   display:grid;
-  grid-template-columns:minmax(0,1.65fr) minmax(340px,.8fr);
+  grid-template-columns:minmax(0,2.4fr) minmax(360px,.8fr);
   gap:18px;
 }
 
@@ -91,7 +91,7 @@ header p{
 .videoBox{
   position:relative;
   width:100%;
-  aspect-ratio:16/9;
+  aspect-ratio:16/10;
   background:#111827;
   border-radius:14px;
   overflow:hidden;
@@ -109,10 +109,10 @@ header p{
   height:100%;
   object-fit:cover;
 
-  transform:
-    scaleX(-1)
-    scale(2);
-
+  /* 영상 자체는 확대하지 않음.
+     카메라 영역 자체를 크게 만든 상태에서
+     영상과 관절선의 좌우 방향만 동일하게 맞춤 */
+  transform:scaleX(-1);
   transform-origin:center center;
 }
 
